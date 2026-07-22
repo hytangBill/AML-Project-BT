@@ -6,8 +6,6 @@ A decision-support prototype that ingests transaction data (CSV/Excel) and gener
 
 > ⚠️ **Demo data only.** Do not upload real, personal, or client transaction data — this is a public student project, not a secure or certified compliance system. Use the included sample datasets or your own synthetic data.
 
-![AML Risk Analysis Dashboard screenshot](./screenshot.png)
-
 ## What it does
 
 Upload a transaction log and the dashboard will:
