@@ -283,8 +283,11 @@ export function analyzeTransactions(
     senderHistoryMap.get(senderKey)!.push(item);
   });
 
-  // --- PRE-PASS: Grouping Engine for Structuring & Smurfing Patterns (AML-STR-01) ---
+  // --- PRE-PASS: Grouping Engine for Structuring & Dispersed Distribution (AML-STR-01 & AML-LAY-02) ---
   interface StructuringGroupData {
+    code: 'AML-STR-01' | 'AML-LAY-02';
+    category: 'Structuring' | 'Layering';
+    title: string;
     senderName: string;
     txns: typeof items;
     txnIds: string[];
@@ -292,7 +295,7 @@ export function analyzeTransactions(
     spanDays: number;
     differingReceivers: boolean;
     weight: number;
-    severity: 'High' | 'Critical';
+    severity: 'Medium' | 'High' | 'Critical';
     description: string;
   }
 
@@ -323,11 +326,12 @@ export function analyzeTransactions(
   });
 
   const structuringWindowMs = thresholds.structuringWindowDays * 24 * 60 * 60 * 1000;
+  const minMaterialityFloorEur = thresholds.cashThreshold * 0.50; // 50% of Cash Reporting Limit
 
   senderGroupingMap.forEach((senderTxList) => {
     senderTxList.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
 
-    // Qualifying transactions: individual EUR amount is below Cash Reporting Threshold (< thresholds.cashThreshold)
+    // Qualifying transactions: individual EUR amount is strictly below Cash Reporting Threshold (< thresholds.cashThreshold)
     const qualifyingTxns = senderTxList.filter(t => t.amountInEur < thresholds.cashThreshold && t.amountInEur > 0);
 
     if (qualifyingTxns.length < 2) return;
@@ -345,10 +349,15 @@ export function analyzeTransactions(
 
       if (cluster.length >= 2) {
         const totalGroupSumEur = cluster.reduce((sum, t) => sum + t.amountInEur, 0);
-        const linkedTxnIds = cluster.map(t => t.id);
 
+        // REQUIREMENT: Minimum absolute materiality floor check (50% of threshold)
+        if (totalGroupSumEur < minMaterialityFloorEur) {
+          continue;
+        }
+
+        const linkedTxnIds = cluster.map(t => t.id);
         const receivers = new Set(cluster.map(t => t.receiver.trim().toLowerCase()));
-        const differingReceivers = receivers.size > 1;
+        const isSameRecipient = receivers.size === 1;
 
         const minMs = Math.min(...cluster.map(t => t.dateObj.getTime()));
         const maxMs = Math.max(...cluster.map(t => t.dateObj.getTime()));
@@ -356,22 +365,51 @@ export function analyzeTransactions(
         const rawDays = diffMs / (1000 * 60 * 60 * 24);
         const spanDays = Math.max(1, Math.round(rawDays) || 1);
 
-        const ratio = totalGroupSumEur / thresholds.cashThreshold;
-        const weight = Math.min(75, Math.max(45, Math.round(35 + (cluster.length * 5) + (ratio * 5))));
-        const severity: 'High' | 'Critical' = weight >= 60 ? 'Critical' : 'High';
-
+        const groupRatio = totalGroupSumEur / thresholds.cashThreshold;
         const senderDisplayName = startTx.sender;
         const totalFormattedEur = Math.round(totalGroupSumEur).toLocaleString();
 
-        const description = `Structuring pattern detected — part of a group of ${cluster.length} transactions from ${senderDisplayName} totaling EUR ${totalFormattedEur} within ${spanDays} day${spanDays > 1 ? 's' : ''} (linked: ${linkedTxnIds.join(', ')})${differingReceivers ? ' [Possible layering via multiple receivers]' : ''}`;
+        let code: 'AML-STR-01' | 'AML-LAY-02';
+        let category: 'Structuring' | 'Layering';
+        let title: string;
+        let weight: number;
+        let severity: 'Medium' | 'High' | 'Critical';
+        let description: string;
+
+        if (isSameRecipient) {
+          // Rule 1: AML-STR-01 ("Structuring — Same Recipient")
+          code = 'AML-STR-01';
+          category = 'Structuring';
+          title = 'Smurfing / Structuring Pattern (Same Recipient)';
+
+          // Scale weight with groupRatio
+          weight = Math.min(75, Math.max(25, Math.round(20 + (groupRatio * 12) + (cluster.length * 2))));
+          severity = weight >= 50 ? 'Critical' : (weight >= 35 ? 'High' : 'Medium');
+
+          description = `AML-STR-01: Structuring pattern — group of ${cluster.length} transactions to the same recipient totaling EUR ${totalFormattedEur} (${groupRatio.toFixed(2)}x the EUR ${thresholds.cashThreshold.toLocaleString()} reporting threshold) within ${spanDays} day${spanDays > 1 ? 's' : ''} (linked: ${linkedTxnIds.join(', ')}).`;
+        } else {
+          // Rule 2: AML-LAY-02 ("Dispersed Fund Distribution — Multiple Recipients")
+          code = 'AML-LAY-02';
+          category = 'Layering';
+          title = 'Dispersed Fund Distribution (Multiple Recipients)';
+
+          // Capped so on its own it CANNOT push the Risk Tier above Medium Risk (max weight 20)
+          weight = Math.min(20, Math.max(10, Math.round(10 + (groupRatio * 3))));
+          severity = 'Medium';
+
+          description = `AML-LAY-02: Dispersed fund distribution — group of ${cluster.length} transactions to multiple recipients totaling EUR ${totalFormattedEur} (${groupRatio.toFixed(2)}x the EUR ${thresholds.cashThreshold.toLocaleString()} reporting threshold) within ${spanDays} day${spanDays > 1 ? 's' : ''} (linked: ${linkedTxnIds.join(', ')}).`;
+        }
 
         const groupData: StructuringGroupData = {
+          code,
+          category,
+          title,
           senderName: senderDisplayName,
           txns: cluster,
           txnIds: linkedTxnIds,
           totalGroupSumEur,
           spanDays,
-          differingReceivers,
+          differingReceivers: !isSameRecipient,
           weight,
           severity,
           description
@@ -379,7 +417,11 @@ export function analyzeTransactions(
 
         cluster.forEach(tx => {
           const existing = transactionStructuringGroupMap.get(tx.id);
-          if (!existing || existing.txnIds.length < groupData.txnIds.length) {
+          if (!existing) {
+            transactionStructuringGroupMap.set(tx.id, groupData);
+          } else if (existing.code === 'AML-LAY-02' && code === 'AML-STR-01') {
+            transactionStructuringGroupMap.set(tx.id, groupData);
+          } else if (existing.code === code && groupData.weight > existing.weight) {
             transactionStructuringGroupMap.set(tx.id, groupData);
           }
         });
@@ -492,14 +534,14 @@ export function analyzeTransactions(
       });
     }
 
-    // --- RULE 4: Structuring / Smurfing Pattern (AML-STR-01) ---
+    // --- RULE 4: Structuring / Smurfing Pattern (AML-STR-01 & AML-LAY-02) ---
     const structuringGroup = transactionStructuringGroupMap.get(item.id);
     if (structuringGroup) {
       rawScore += structuringGroup.weight;
       triggers.push({
-        code: 'AML-STR-01',
-        category: 'Structuring',
-        title: 'Smurfing / Structuring Multi-Transaction Pattern',
+        code: structuringGroup.code,
+        category: structuringGroup.category,
+        title: structuringGroup.title,
         description: structuringGroup.description,
         weight: structuringGroup.weight,
         severity: structuringGroup.severity

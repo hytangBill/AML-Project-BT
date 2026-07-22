@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   JurisdictionType, 
   JurisdictionThresholds, 
@@ -16,7 +16,8 @@ import { RiskTable } from './components/RiskTable';
 import { DataUploadModal } from './components/DataUploadModal';
 import { ThresholdSettingsPanel } from './components/ThresholdSettingsPanel';
 import { AuditExportModal } from './components/AuditExportModal';
-import { ShieldCheck, Info, Upload, Sliders, Database } from 'lucide-react';
+import { MethodologyModal } from './components/MethodologyModal';
+import { ShieldCheck, Info, Upload, Sliders, Database, BookOpen } from 'lucide-react';
 
 export default function App() {
   // State
@@ -29,7 +30,7 @@ export default function App() {
     jurisdiction: 'EU'
   });
 
-  const [datasetName, setDatasetName] = useState<string>('Structuring & Smurfing Syndicate Dataset');
+  const [datasetName, setDatasetName] = useState<string>(SAMPLE_DATASETS[0].name);
   const [rawRecords, setRawRecords] = useState<RawTransactionRecord[]>(SAMPLE_DATASETS[0].data);
   const [mapping, setMapping] = useState<ColumnMapping>({
     transactionDate: 'transaction_date',
@@ -48,6 +49,7 @@ export default function App() {
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
+  const [isMethodologyOpen, setIsMethodologyOpen] = useState<boolean>(false);
 
   // Analysts Tags State override map
   const [analystOverrides, setAnalystOverrides] = useState<Record<string, { tag: AnalystTag; notes?: string }>>({});
@@ -99,12 +101,14 @@ export default function App() {
     }));
   };
 
-  const handleQuickLoadSample = () => {
-    const nextSample = datasetName.includes('Structuring') ? SAMPLE_DATASETS[1] : SAMPLE_DATASETS[0];
-    setRawRecords(nextSample.data);
-    setDatasetName(nextSample.name);
+  const handleSelectSampleDataset = (sampleId: string) => {
+    const sample = SAMPLE_DATASETS.find(s => s.id === sampleId) || SAMPLE_DATASETS[0];
+    setRawRecords(sample.data);
+    setDatasetName(sample.name);
     setAnalystOverrides({});
   };
+
+  const isDemoDataset = datasetName.startsWith('Demo:') || SAMPLE_DATASETS.some(s => s.name === datasetName);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
@@ -115,17 +119,19 @@ export default function App() {
         jurisdictionName={thresholds.name}
         versionInfo={versionInfo}
         totalRecords={analysisResult.processed.length}
+        activeDatasetName={datasetName}
         onOpenUpload={() => setIsUploadOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onExportAudit={() => setIsExportOpen(true)}
-        onLoadSample={handleQuickLoadSample}
+        onOpenMethodology={() => setIsMethodologyOpen(true)}
+        onSelectSampleDataset={handleSelectSampleDataset}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         
         {/* Top Permanent Regulatory Disclaimer Banner */}
-        <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex items-start space-x-3 text-xs text-slate-400 shadow-sm">
+        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-start space-x-3 text-xs text-slate-400 shadow-sm">
           <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
             <span className="font-semibold text-slate-200 uppercase tracking-wider text-[10px] block mb-0.5">
@@ -135,23 +141,32 @@ export default function App() {
               This application provides automated risk scoring and decision support for Anti-Money Laundering (AML) compliance analysts. <strong>{ADVISORY_DISCLAIMER}</strong>
             </span>
           </div>
-          <div className="hidden sm:flex items-center space-x-2 text-[11px] font-mono bg-slate-950 px-2.5 py-1 rounded border border-slate-800 text-slate-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Audit Trail Active (v{versionInfo.versionNumber})</span>
-          </div>
+          <button
+            onClick={() => setIsMethodologyOpen(true)}
+            className="hidden sm:flex items-center space-x-1.5 text-[11px] bg-blue-950 hover:bg-blue-900 px-2.5 py-1 rounded border border-blue-800/80 text-blue-300 font-medium transition-colors"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Methodology</span>
+          </button>
         </div>
 
         {/* Dataset Header Card */}
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
           <div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
               <span className="text-xs font-mono uppercase text-blue-400 font-bold bg-blue-950 px-2 py-0.5 rounded border border-blue-900">
                 Active Dataset
               </span>
               <h2 className="text-base font-bold text-slate-100">{datasetName}</h2>
+              {isDemoDataset && (
+                <span className="text-[10px] bg-slate-800 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-medium">
+                  Sample Data (Synthetic)
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400 mt-1">
               Screened against <strong className="text-slate-200">{thresholds.name}</strong> thresholds • {analysisResult.processed.length} Transactions
+              {isDemoDataset && <span className="text-slate-500 italic"> — Sample data for demonstration — not real financial data</span>}
             </p>
           </div>
 
@@ -161,7 +176,7 @@ export default function App() {
               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs font-medium inline-flex items-center space-x-1.5 transition-colors"
             >
               <Upload className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Change File / Dataset</span>
+              <span>Import Data</span>
             </button>
 
             <button
@@ -211,8 +226,15 @@ export default function App() {
           <div>
             AML Risk Analysis Dashboard • Professional Compliance Decision Support
           </div>
-          <div className="font-mono text-[11px] text-slate-600">
-            Active Framework: {thresholds.name} • Version v{versionInfo.versionNumber}
+          <div className="flex items-center space-x-3 text-[11px]">
+            <button 
+              onClick={() => setIsMethodologyOpen(true)}
+              className="text-blue-400 hover:underline"
+            >
+              Methodology & Disclosures
+            </button>
+            <span>•</span>
+            <span className="font-mono text-slate-600">Framework: {thresholds.name} (v{versionInfo.versionNumber})</span>
           </div>
         </div>
       </footer>
@@ -242,6 +264,12 @@ export default function App() {
         datasetName={datasetName}
       />
 
+      <MethodologyModal
+        isOpen={isMethodologyOpen}
+        onClose={() => setIsMethodologyOpen(false)}
+      />
+
     </div>
   );
 }
+
