@@ -30,9 +30,14 @@ export const RiskTable: React.FC<RiskTableProps> = ({
   const [sortField, setSortField] = useState<'riskScore' | 'amount' | 'transactionDate'>('riskScore');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Filter & Sort Logic
   const filteredAlerts = useMemo(() => {
+    // Reset to first page on search or filter change
+    setCurrentPage(1);
+
     return alerts
       .filter((item) => {
         // Search term match
@@ -78,6 +83,16 @@ export const RiskTable: React.FC<RiskTableProps> = ({
         }
       });
   }, [alerts, searchTerm, selectedTier, selectedTag, sortField, sortOrder]);
+
+  const totalRecords = filteredAlerts.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalRecords);
+
+  const paginatedAlerts = useMemo(() => {
+    return filteredAlerts.slice(startIndex, endIndex);
+  }, [filteredAlerts, startIndex, endIndex]);
 
   const toggleSort = (field: 'riskScore' | 'amount' | 'transactionDate') => {
     if (sortField === field) {
@@ -217,15 +232,16 @@ export const RiskTable: React.FC<RiskTableProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 bg-slate-900/40 text-slate-200">
-            {filteredAlerts.length === 0 ? (
+            {paginatedAlerts.length === 0 ? (
               <tr>
                 <td colSpan={9} className="p-8 text-center text-slate-500 italic">
                   No transaction records match the selected filter criteria.
                 </td>
               </tr>
             ) : (
-              filteredAlerts.map((item, idx) => {
+              paginatedAlerts.map((item, idx) => {
                 const isExpanded = expandedId === item.id;
+                const globalIndex = startIndex + idx + 1;
 
                 return (
                   <React.Fragment key={item.id}>
@@ -235,7 +251,7 @@ export const RiskTable: React.FC<RiskTableProps> = ({
                         isExpanded ? 'bg-slate-800/90 border-l-4 border-l-blue-500' : ''
                       }`}
                     >
-                      <td className="p-3 text-slate-500 font-mono">{idx + 1}</td>
+                      <td className="p-3 text-slate-500 font-mono">{globalIndex}</td>
 
                       {/* Score & Tier Badge */}
                       <td className="p-3">
@@ -335,6 +351,79 @@ export const RiskTable: React.FC<RiskTableProps> = ({
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination Footer Bar */}
+      <div className="px-4 py-3 border-t border-slate-800 bg-slate-900/90 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 font-mono">
+        
+        {/* Record count indicator */}
+        <div>
+          Showing <strong className="text-slate-200">{totalRecords === 0 ? 0 : startIndex + 1}</strong> to <strong className="text-slate-200">{endIndex}</strong> of <strong className="text-slate-200">{totalRecords.toLocaleString()}</strong> records
+        </div>
+
+        {/* Page navigation controls */}
+        <div className="flex items-center space-x-2">
+          
+          {/* Rows per page selector */}
+          <div className="flex items-center space-x-1 mr-2">
+            <span className="text-[11px]">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="bg-slate-950 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 text-xs outline-none focus:border-blue-500"
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={250}>250</option>
+            </select>
+          </div>
+
+          <button
+            onClick={() => setCurrentPage(1)}
+            disabled={safeCurrentPage <= 1}
+            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 font-bold transition-colors"
+            title="First Page"
+          >
+            &laquo;
+          </button>
+          
+          <button
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            disabled={safeCurrentPage <= 1}
+            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 transition-colors"
+            title="Previous Page"
+          >
+            &lsaquo; Prev
+          </button>
+
+          <span className="px-2 py-1 text-slate-300 font-semibold bg-slate-950 border border-slate-800 rounded">
+            Page {safeCurrentPage} of {totalPages}
+          </span>
+
+          <button
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            disabled={safeCurrentPage >= totalPages}
+            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 transition-colors"
+            title="Next Page"
+          >
+            Next &rsaquo;
+          </button>
+
+          <button
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={safeCurrentPage >= totalPages}
+            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 font-bold transition-colors"
+            title="Last Page"
+          >
+            &raquo;
+          </button>
+
+        </div>
+
       </div>
 
     </div>

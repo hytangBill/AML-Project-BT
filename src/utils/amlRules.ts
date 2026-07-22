@@ -105,12 +105,13 @@ const HIGH_RISK_COUNTRY_ALIASES: Record<string, string[]> = {
  */
 export function isHighRiskCountry(
   countryInput: string, 
-  configuredHighRiskList: string[]
+  configuredHighRiskList: string[],
+  configuredUpperMemo?: string[]
 ): { isHighRisk: boolean; matchedName: string; codeMatched: string } {
   if (!countryInput) return { isHighRisk: false, matchedName: '', codeMatched: '' };
   
   const inputUpper = countryInput.trim().toUpperCase();
-  const configuredUpper = configuredHighRiskList.map(c => c.trim().toUpperCase());
+  const configuredUpper = configuredUpperMemo || configuredHighRiskList.map(c => c.trim().toUpperCase());
 
   // 1. Direct match with configured code or name
   if (configuredUpper.includes(inputUpper)) {
@@ -301,8 +302,10 @@ export function analyzeTransactions(
 
   const transactionStructuringGroupMap = new Map<string, StructuringGroupData>();
 
-  // Group all transactions by Sender Account (or Sender Name)
+  // Group all transactions by Sender Account (or Sender Name) using Set for O(1) deduplication
   const senderGroupingMap = new Map<string, typeof items>();
+  const senderTxSetMap = new Map<string, Set<string>>();
+
   items.forEach(item => {
     const senderKey = (item.accountNumber && item.accountNumber.length > 5 && !item.accountNumber.startsWith('ACC-')) 
       ? item.accountNumber.trim().toLowerCase() 
@@ -310,28 +313,32 @@ export function analyzeTransactions(
     
     const nameKey = item.sender.trim().toLowerCase();
 
-    if (!senderGroupingMap.has(senderKey)) {
-      senderGroupingMap.set(senderKey, []);
-    }
-    senderGroupingMap.get(senderKey)!.push(item);
-
+    const keysToGroup = [senderKey];
     if (nameKey !== senderKey) {
-      if (!senderGroupingMap.has(nameKey)) {
-        senderGroupingMap.set(nameKey, []);
-      }
-      if (!senderGroupingMap.get(nameKey)!.some(i => i.id === item.id)) {
-        senderGroupingMap.get(nameKey)!.push(item);
-      }
+      keysToGroup.push(nameKey);
     }
+
+    keysToGroup.forEach(k => {
+      let group = senderGroupingMap.get(k);
+      let idSet = senderTxSetMap.get(k);
+      if (!group || !idSet) {
+        group = [];
+        idSet = new Set<string>();
+        senderGroupingMap.set(k, group);
+        senderTxSetMap.set(k, idSet);
+      }
+      if (!idSet.has(item.id)) {
+        idSet.add(item.id);
+        group.push(item);
+      }
+    });
   });
 
   const structuringWindowMs = thresholds.structuringWindowDays * 24 * 60 * 60 * 1000;
   const minMaterialityFloorEur = thresholds.cashThreshold * 0.50; // 50% of Cash Reporting Limit
 
   senderGroupingMap.forEach((senderTxList) => {
-    senderTxList.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
-
-    // Qualifying transactions: individual EUR amount is strictly below Cash Reporting Threshold (< thresholds.cashThreshold)
+    // senderTxList is already sorted chronologically because items was sorted by dateObj
     const qualifyingTxns = senderTxList.filter(t => t.amountInEur < thresholds.cashThreshold && t.amountInEur > 0);
 
     if (qualifyingTxns.length < 2) return;
@@ -344,6 +351,8 @@ export function analyzeTransactions(
         const nextTx = qualifyingTxns[j];
         if (nextTx.dateObj.getTime() - startTx.dateObj.getTime() <= structuringWindowMs) {
           cluster.push(nextTx);
+        } else {
+          break; // Stop checking further transactions in this group
         }
       }
 
@@ -432,6 +441,9 @@ export function analyzeTransactions(
   let highRiskCount = 0;
   let criticalRiskCount = 0;
 
+  // Pre-calculate configured high risk countries array in uppercase for fast lookup
+  const configuredHighRiskUpper = thresholds.highRiskCountries.map(c => c.trim().toUpperCase());
+
   // 2. Evaluate Risk Factors per Transaction using converted EUR values
   const processed: ProcessedTransaction[] = items.map((item) => {
     const triggers: TriggerReason[] = [];
@@ -478,8 +490,8 @@ export function analyzeTransactions(
     }
 
     // --- RULE 2: Geographic Risk (Bug 2 Fix) ---
-    const senderGeoMatch = isHighRiskCountry(item.senderCountry, thresholds.highRiskCountries);
-    const receiverGeoMatch = isHighRiskCountry(item.receiverCountry, thresholds.highRiskCountries);
+    const senderGeoMatch = isHighRiskCountry(item.senderCountry, thresholds.highRiskCountries, configuredHighRiskUpper);
+    const receiverGeoMatch = isHighRiskCountry(item.receiverCountry, thresholds.highRiskCountries, configuredHighRiskUpper);
 
     if (senderGeoMatch.isHighRisk || receiverGeoMatch.isHighRisk) {
       const weight = (senderGeoMatch.isHighRisk && receiverGeoMatch.isHighRisk) ? 40 : 30;
@@ -549,9 +561,22 @@ export function analyzeTransactions(
     }
 
     // --- RULE 5: Rapid Movement / Layering Pattern ---
-    const layeringWindowStart = new Date(item.dateObj.getTime() - thresholds.layeringWindowHours * 60 * 60 * 1000);
+    const layeringWindowStartMs = item.dateObj.getTime() - thresholds.layeringWindowHours * 60 * 60 * 1000;
+    const itemDateMs = item.dateObj.getTime();
     const accountTxList = accountHistoryMap.get(item.accountNumber) || [];
-    const rapidTxCount = accountTxList.filter(t => t.dateObj >= layeringWindowStart && t.dateObj <= item.dateObj).length;
+    
+    // Scan backwards from end of accountTxList for O(1) velocity window lookup
+    let rapidTxCount = 0;
+    for (let k = accountTxList.length - 1; k >= 0; k--) {
+      const tMs = accountTxList[k].dateObj.getTime();
+      if (tMs <= itemDateMs) {
+        if (tMs >= layeringWindowStartMs) {
+          rapidTxCount++;
+        } else {
+          break; // Stop as soon as transaction falls outside window
+        }
+      }
+    }
 
     if (rapidTxCount >= thresholds.layeringMinCount) {
       const weight = 25;
@@ -642,5 +667,44 @@ export function analyzeTransactions(
       criticalTxCount: criticalRiskCount
     }
   };
+}
+
+/**
+ * Async wrapper with progress updates for processing large datasets without blocking UI
+ */
+export async function analyzeTransactionsAsync(
+  records: RawTransactionRecord[],
+  mapping: ColumnMapping,
+  thresholds: JurisdictionThresholds,
+  onProgress?: (progress: { current: number; total: number; phase: string }) => void
+): Promise<{ processed: ProcessedTransaction[]; stats: DatasetStats }> {
+  const total = records ? records.length : 0;
+
+  if (total === 0) {
+    return analyzeTransactions(records, mapping, thresholds);
+  }
+
+  if (onProgress) {
+    onProgress({ current: 0, total, phase: 'Initial Parsing & Pre-processing' });
+  }
+
+  // Allow browser tick to render initial progress modal
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  if (onProgress) {
+    onProgress({ current: Math.round(total * 0.4), total, phase: 'Evaluating Risk Typologies & Patterns' });
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  const result = analyzeTransactions(records, mapping, thresholds);
+
+  if (onProgress) {
+    onProgress({ current: total, total, phase: 'Finalizing Score Calculations' });
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  return result;
 }
 

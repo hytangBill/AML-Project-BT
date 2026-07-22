@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   JurisdictionType, 
   JurisdictionThresholds, 
@@ -7,7 +7,7 @@ import {
   ColumnMapping, 
   AnalystTag 
 } from './types';
-import { JURISDICTION_PRESETS, analyzeTransactions, ADVISORY_DISCLAIMER } from './utils/amlRules';
+import { JURISDICTION_PRESETS, analyzeTransactions, analyzeTransactionsAsync, ADVISORY_DISCLAIMER } from './utils/amlRules';
 import { SAMPLE_DATASETS } from './utils/sampleData';
 import { Header } from './components/Header';
 import { OverviewCards } from './components/OverviewCards';
@@ -17,7 +17,7 @@ import { DataUploadModal } from './components/DataUploadModal';
 import { ThresholdSettingsPanel } from './components/ThresholdSettingsPanel';
 import { AuditExportModal } from './components/AuditExportModal';
 import { MethodologyModal } from './components/MethodologyModal';
-import { ShieldCheck, Info, Upload, Sliders, Database, BookOpen } from 'lucide-react';
+import { ShieldCheck, Info, Upload, Sliders, Database, BookOpen, ShieldAlert } from 'lucide-react';
 
 export default function App() {
   // State
@@ -51,15 +51,47 @@ export default function App() {
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
   const [isMethodologyOpen, setIsMethodologyOpen] = useState<boolean>(false);
 
+  // Analysis Progress & Processing state
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisProgress, setAnalysisProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
+  const [analysisResult, setAnalysisResult] = useState(() => analyzeTransactions(SAMPLE_DATASETS[0].data, mapping, JURISDICTION_PRESETS.EU));
+
   // Analysts Tags State override map
   const [analystOverrides, setAnalystOverrides] = useState<Record<string, { tag: AnalystTag; notes?: string }>>({});
 
-  // Perform Analysis using active rules & thresholds
-  const analysisResult = useMemo(() => {
-    const result = analyzeTransactions(rawRecords, mapping, thresholds);
-    
-    // Apply any analyst tags or notes overrides stored in state
-    const updatedProcessed = result.processed.map(item => {
+  // Async Analysis Effect with progress reporting
+  useEffect(() => {
+    let active = true;
+    setIsAnalyzing(true);
+    setAnalysisProgress({ current: 0, total: rawRecords.length, phase: 'Initializing AML Risk Scoring Engine...' });
+
+    analyzeTransactionsAsync(rawRecords, mapping, thresholds, (prog) => {
+      if (active) {
+        setAnalysisProgress(prog);
+      }
+    }).then(res => {
+      if (active) {
+        setAnalysisResult(res);
+        setIsAnalyzing(false);
+        setAnalysisProgress(null);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [rawRecords, mapping, thresholds]);
+
+  // Combine calculated result with user analyst overrides
+  const finalResult = useMemo(() => {
+    if (!analysisResult) {
+      return {
+        processed: [],
+        stats: { totalTransactions: 0, totalVolume: 0, currencyMap: {}, dateStart: 'N/A', dateEnd: 'N/A', uniqueAccountsCount: 0, highRiskTxCount: 0, criticalTxCount: 0 }
+      };
+    }
+
+    const updatedProcessed = analysisResult.processed.map(item => {
       if (analystOverrides[item.id]) {
         return {
           ...item,
@@ -72,9 +104,9 @@ export default function App() {
 
     return {
       processed: updatedProcessed,
-      stats: result.stats
+      stats: analysisResult.stats
     };
-  }, [rawRecords, mapping, thresholds, analystOverrides]);
+  }, [analysisResult, analystOverrides]);
 
   // Handlers
   const handleDataLoaded = (newRecords: RawTransactionRecord[], newMapping: ColumnMapping, name: string) => {
@@ -118,7 +150,7 @@ export default function App() {
         jurisdiction={jurisdiction}
         jurisdictionName={thresholds.name}
         versionInfo={versionInfo}
-        totalRecords={analysisResult.processed.length}
+        totalRecords={finalResult.processed.length}
         activeDatasetName={datasetName}
         onOpenUpload={() => setIsUploadOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -165,7 +197,7 @@ export default function App() {
               )}
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Screened against <strong className="text-slate-200">{thresholds.name}</strong> thresholds • {analysisResult.processed.length} Transactions
+              Screened against <strong className="text-slate-200">{thresholds.name}</strong> thresholds • {finalResult.processed.length.toLocaleString()} Transactions
               {isDemoDataset && <span className="text-slate-500 italic"> — Sample data for demonstration — not real financial data</span>}
             </p>
           </div>
@@ -191,14 +223,14 @@ export default function App() {
 
         {/* Overview KPI Cards */}
         <OverviewCards
-          stats={analysisResult.stats}
-          alerts={analysisResult.processed}
+          stats={finalResult.stats}
+          alerts={finalResult.processed}
           versionInfo={versionInfo}
           jurisdictionName={thresholds.name}
         />
 
         {/* Analytical Charts */}
-        <ChartsSection alerts={analysisResult.processed} />
+        <ChartsSection alerts={finalResult.processed} />
 
         {/* Risk Ranking Table */}
         <div className="space-y-3">
@@ -212,13 +244,46 @@ export default function App() {
           </div>
 
           <RiskTable
-            alerts={analysisResult.processed}
+            alerts={finalResult.processed}
             thresholds={thresholds}
             onUpdateTag={handleUpdateTag}
           />
         </div>
 
       </main>
+
+      {/* Async Processing Progress Overlay */}
+      {isAnalyzing && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl space-y-4 text-center">
+            <div className="w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 mx-auto animate-pulse">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-100 text-base">Screening AML Risk Typologies</h3>
+              <p className="text-xs text-slate-400 mt-1">Executing multi-currency conversion, structuring detection, and watchlist scoring...</p>
+            </div>
+
+            {analysisProgress && (
+              <div className="space-y-2 pt-2">
+                <div className="flex justify-between text-xs text-slate-300 font-mono">
+                  <span>{analysisProgress.phase}</span>
+                  <span className="text-blue-400 font-bold">{Math.round((analysisProgress.current / Math.max(1, analysisProgress.total)) * 100)}%</span>
+                </div>
+                <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                  <div 
+                    className="bg-gradient-to-r from-blue-600 to-emerald-500 h-full transition-all duration-200 ease-out"
+                    style={{ width: `${Math.min(100, Math.round((analysisProgress.current / Math.max(1, analysisProgress.total)) * 100))}%` }}
+                  />
+                </div>
+                <div className="text-[11px] text-slate-500 font-mono">
+                  Processing {analysisProgress.current.toLocaleString()} / {analysisProgress.total.toLocaleString()} transactions
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500 mt-12">
