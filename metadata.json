@@ -1,0 +1,6 @@
+{
+  "name": "AML Risk Analysis Dashboard",
+  "description": "Professional Anti-Money Laundering (AML) compliance risk analysis dashboard with flexible threshold settings, automated risk scoring, trigger reason breakdowns, analyst audit logs, and regulatory recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
