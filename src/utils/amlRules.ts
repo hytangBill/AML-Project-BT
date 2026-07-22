@@ -24,6 +24,47 @@ export const DEFAULT_EXCHANGE_RATES: Record<string, number> = {
   INR: 0.011
 };
 
+export interface DisplayCurrencyInfo {
+  code: 'EUR' | 'USD';
+  symbol: '€' | '$';
+  label: 'Amount (EUR Equivalent)' | 'Amount (USD Equivalent)';
+  shortLabel: 'EUR' | 'USD';
+}
+
+export function getDisplayCurrencyInfo(jurisdictionCode: JurisdictionType): DisplayCurrencyInfo {
+  if (jurisdictionCode === 'EU') {
+    return {
+      code: 'EUR',
+      symbol: '€',
+      label: 'Amount (EUR Equivalent)',
+      shortLabel: 'EUR'
+    };
+  } else {
+    return {
+      code: 'USD',
+      symbol: '$',
+      label: 'Amount (USD Equivalent)',
+      shortLabel: 'USD'
+    };
+  }
+}
+
+export function convertEurToDisplayAmount(amountInEur: number, jurisdictionCode: JurisdictionType): number {
+  if (jurisdictionCode === 'EU') {
+    return amountInEur;
+  }
+  // Convert EUR to USD using fixed exchange rate (1 USD = 0.93 EUR => 1 EUR = 1/0.93 USD)
+  const usdRate = DEFAULT_EXCHANGE_RATES.USD || 0.93;
+  return amountInEur / usdRate;
+}
+
+export function formatMonetaryAmount(amount: number): string {
+  return amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
 export const JURISDICTION_PRESETS: Record<JurisdictionType, JurisdictionThresholds> = {
   EU: {
     name: 'European Union (AMLR / AMLD6)',

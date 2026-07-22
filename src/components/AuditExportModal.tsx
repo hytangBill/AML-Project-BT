@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Download, X, FileText, CheckCircle2, ShieldCheck } from 'lucide-react';
 import Papa from 'papaparse';
 import { ProcessedTransaction, JurisdictionThresholds, ThresholdVersionInfo } from '../types';
-import { ADVISORY_DISCLAIMER } from '../utils/amlRules';
+import { ADVISORY_DISCLAIMER, getDisplayCurrencyInfo, convertEurToDisplayAmount, formatMonetaryAmount } from '../utils/amlRules';
 
 interface AuditExportModalProps {
   isOpen: boolean;
@@ -27,6 +27,9 @@ export const AuditExportModal: React.FC<AuditExportModalProps> = ({
 
   const handleDownloadCSV = () => {
     const nowIso = new Date().toISOString();
+    const ccyInfo = getDisplayCurrencyInfo(thresholds.jurisdictionCode);
+    const cashThresholdDisplay = convertEurToDisplayAmount(thresholds.cashThreshold, thresholds.jurisdictionCode);
+    const structuringAmountDisplay = convertEurToDisplayAmount(thresholds.structuringAmount, thresholds.jurisdictionCode);
 
     // 1. Audit Metadata Header Block
     const metadataLines = [
@@ -35,8 +38,8 @@ export const AuditExportModal: React.FC<AuditExportModalProps> = ({
       ['Dataset Reference', datasetName],
       ['Regulatory Jurisdiction Framework', `${thresholds.name} (${thresholds.jurisdictionCode})`],
       ['Active Threshold Rule Version', `v${versionInfo.versionNumber} (${versionInfo.updatedAt})`],
-      ['Cash Reporting Threshold', `${thresholds.currency} ${thresholds.cashThreshold}`],
-      ['Structuring Limit / Days Window', `${thresholds.currency} ${thresholds.structuringAmount} / ${thresholds.structuringWindowDays} Days`],
+      ['Cash Reporting Threshold', `${ccyInfo.shortLabel} ${cashThresholdDisplay.toFixed(2)}`],
+      ['Structuring Limit / Days Window', `${ccyInfo.shortLabel} ${structuringAmountDisplay.toFixed(2)} / ${thresholds.structuringWindowDays} Days`],
       ['Layering Window / Min Txs', `${thresholds.layeringWindowHours} Hours / ${thresholds.layeringMinCount} Txs`],
       ['High-Risk Jurisdiction Countries', thresholds.highRiskCountries.join('; ')],
       ['PEP Screening Enabled', thresholds.pepScreening ? 'YES' : 'NO'],
@@ -48,27 +51,31 @@ export const AuditExportModal: React.FC<AuditExportModalProps> = ({
     ];
 
     // 2. Data Rows
-    const dataRows = alerts.map((item) => ({
-      'Transaction ID': item.id,
-      'Transaction Date': item.transactionDate,
-      'Risk Score': item.riskScore,
-      'Risk Tier': item.riskTier,
-      'Amount (Original)': item.amount,
-      'Currency': item.currency,
-      'Amount (EUR Equivalent)': item.amountInEur.toFixed(2),
-      'Primary Account Under Review': item.primaryAccount,
-      'Sender Name': item.sender,
-      'Sender Country': item.senderCountry,
-      'Receiver Name': item.receiver,
-      'Receiver Country': item.receiverCountry,
-      'Sender Account Number': item.accountNumber,
-      'Transaction Type': item.transactionType,
-      'Customer Type': item.customerType,
-      'Trigger Rules': item.triggerReasons.map(t => `${t.code}:${t.title}`).join(' | '),
-      'Analyst Status Tag': item.analystTag,
-      'Analyst Notes': item.analystNotes || '',
-      'Recommended Action': item.recommendedAction || ''
-    }));
+    const amountColumnHeader = ccyInfo.label;
+    const dataRows = alerts.map((item) => {
+      const displayAmount = convertEurToDisplayAmount(item.amountInEur, thresholds.jurisdictionCode);
+      return {
+        'Transaction ID': item.id,
+        'Transaction Date': item.transactionDate,
+        'Risk Score': item.riskScore,
+        'Risk Tier': item.riskTier,
+        'Amount (Original)': Number(item.amount).toFixed(2),
+        'Currency': item.currency,
+        [amountColumnHeader]: displayAmount.toFixed(2),
+        'Primary Account Under Review': item.primaryAccount,
+        'Sender Name': item.sender,
+        'Sender Country': item.senderCountry,
+        'Receiver Name': item.receiver,
+        'Receiver Country': item.receiverCountry,
+        'Sender Account Number': item.accountNumber,
+        'Transaction Type': item.transactionType,
+        'Customer Type': item.customerType,
+        'Trigger Rules': item.triggerReasons.map(t => `${t.code}:${t.title}`).join(' | '),
+        'Analyst Status Tag': item.analystTag,
+        'Analyst Notes': item.analystNotes || '',
+        'Recommended Action': item.recommendedAction || ''
+      };
+    });
 
     const metadataCsv = Papa.unparse(metadataLines);
     const dataCsv = Papa.unparse(dataRows);
@@ -118,7 +125,7 @@ export const AuditExportModal: React.FC<AuditExportModalProps> = ({
             <div className="text-slate-400 space-y-1 font-mono text-[11px]">
               <div>• Framework: <strong className="text-slate-200">{thresholds.name}</strong></div>
               <div>• Dataset: <strong className="text-slate-200">{datasetName}</strong> ({alerts.length} records)</div>
-              <div>• Cash Threshold: <strong className="text-slate-200">{thresholds.currency} {thresholds.cashThreshold.toLocaleString()}</strong></div>
+              <div>• Cash Threshold: <strong className="text-slate-200">{getDisplayCurrencyInfo(thresholds.jurisdictionCode).shortLabel} {formatMonetaryAmount(convertEurToDisplayAmount(thresholds.cashThreshold, thresholds.jurisdictionCode))}</strong></div>
               <div>• Active Version ID: <strong className="text-slate-200">{versionInfo.versionId}</strong></div>
             </div>
           </div>

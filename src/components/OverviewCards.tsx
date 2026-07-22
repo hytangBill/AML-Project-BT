@@ -1,27 +1,30 @@
 import React from 'react';
 import { AlertTriangle, DollarSign, Activity, ShieldAlert } from 'lucide-react';
-import { DatasetStats, ProcessedTransaction, ThresholdVersionInfo } from '../types';
+import { DatasetStats, ProcessedTransaction, ThresholdVersionInfo, JurisdictionType } from '../types';
+import { getDisplayCurrencyInfo, convertEurToDisplayAmount, formatMonetaryAmount } from '../utils/amlRules';
 
 interface OverviewCardsProps {
   stats: DatasetStats;
   alerts: ProcessedTransaction[];
   versionInfo: ThresholdVersionInfo;
   jurisdictionName: string;
+  jurisdictionCode: JurisdictionType;
 }
 
 export const OverviewCards: React.FC<OverviewCardsProps> = ({
   stats,
   alerts,
   versionInfo,
-  jurisdictionName
+  jurisdictionName,
+  jurisdictionCode
 }) => {
   const criticalCount = alerts.filter(a => a.riskTier === 'Critical Risk').length;
   const highCount = alerts.filter(a => a.riskTier === 'High Risk').length;
   const mediumCount = alerts.filter(a => a.riskTier === 'Medium Risk').length;
   const totalAlertsCount = criticalCount + highCount + mediumCount;
 
-  // Primary currency
-  const mainCcy = Object.keys(stats.currencyMap)[0] || 'USD';
+  const ccyInfo = getDisplayCurrencyInfo(jurisdictionCode);
+  const displayVolume = convertEurToDisplayAmount(stats.totalVolume, jurisdictionCode);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -30,13 +33,13 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col justify-between shadow-sm">
         <div className="flex items-center justify-between text-slate-400">
           <span className="text-[11px] font-bold uppercase tracking-wider">Total Volume Analyzed</span>
-          <div className="w-8 h-8 rounded-lg bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-            <DollarSign className="w-4 h-4" />
+          <div className="w-8 h-8 rounded-lg bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-mono text-sm font-bold">
+            {ccyInfo.symbol}
           </div>
         </div>
         <div className="mt-2">
           <div className="text-2xl font-bold font-mono text-slate-100">
-            {mainCcy} {stats.totalVolume.toLocaleString()}
+            {ccyInfo.symbol} {formatMonetaryAmount(displayVolume)}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
             Across {stats.uniqueAccountsCount} unique account entities

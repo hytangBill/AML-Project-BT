@@ -227,6 +227,7 @@ export default function App() {
           alerts={finalResult.processed}
           versionInfo={versionInfo}
           jurisdictionName={thresholds.name}
+          jurisdictionCode={jurisdiction}
         />
 
         {/* Analytical Charts */}

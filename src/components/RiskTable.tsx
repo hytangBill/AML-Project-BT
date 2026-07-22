@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ProcessedTransaction, RiskTier, AnalystTag, JurisdictionThresholds } from '../types';
 import { AlertDetailPanel } from './AlertDetailPanel';
+import { getDisplayCurrencyInfo, convertEurToDisplayAmount, formatMonetaryAmount } from '../utils/amlRules';
 
 interface RiskTableProps {
   alerts: ProcessedTransaction[];
@@ -222,7 +223,7 @@ export const RiskTable: React.FC<RiskTableProps> = ({
                 className="p-3 cursor-pointer hover:text-white transition-colors"
               >
                 <div className="flex items-center space-x-1">
-                  <span>Amount (Original & EUR)</span>
+                  <span>{getDisplayCurrencyInfo(thresholds.jurisdictionCode).label}</span>
                   <ArrowUpDown className="w-3 h-3 text-slate-500" />
                 </div>
               </th>
@@ -283,16 +284,23 @@ export const RiskTable: React.FC<RiskTableProps> = ({
                         </div>
                       </td>
 
-                      {/* Amount (Original & EUR) */}
+                      {/* Amount (Original & Normalized) */}
                       <td className="p-3 font-mono">
                         <div className="font-bold text-slate-100">
-                          {item.currency} {item.amount.toLocaleString()}
+                          {item.currency} {formatMonetaryAmount(item.amount)}
                         </div>
-                        {item.currency !== 'EUR' && (
-                          <div className="text-[10px] text-emerald-400 font-semibold">
-                            ≈ EUR {item.amountInEur.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-                        )}
+                        {(() => {
+                          const ccyInfo = getDisplayCurrencyInfo(thresholds.jurisdictionCode);
+                          const displayAmount = convertEurToDisplayAmount(item.amountInEur, thresholds.jurisdictionCode);
+                          if (item.currency !== ccyInfo.code) {
+                            return (
+                              <div className="text-[10px] text-emerald-400 font-semibold">
+                                ≈ {ccyInfo.shortLabel} {formatMonetaryAmount(displayAmount)}
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                       </td>
 
                       {/* Triggers summary */}

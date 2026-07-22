@@ -14,7 +14,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { ProcessedTransaction, AnalystTag, JurisdictionThresholds } from '../types';
-import { ADVISORY_DISCLAIMER } from '../utils/amlRules';
+import { ADVISORY_DISCLAIMER, getDisplayCurrencyInfo, convertEurToDisplayAmount, formatMonetaryAmount } from '../utils/amlRules';
 
 interface AlertDetailPanelProps {
   alert: ProcessedTransaction;
@@ -78,8 +78,20 @@ export const AlertDetailPanel: React.FC<AlertDetailPanelProps> = ({
         {/* Amount */}
         <div className="text-right font-mono">
           <div className="text-lg font-bold text-white">
-            {alert.currency} {alert.amount.toLocaleString()}
+            {alert.currency} {formatMonetaryAmount(alert.amount)}
           </div>
+          {(() => {
+            const ccyInfo = getDisplayCurrencyInfo(thresholds.jurisdictionCode);
+            const displayAmount = convertEurToDisplayAmount(alert.amountInEur, thresholds.jurisdictionCode);
+            if (alert.currency !== ccyInfo.code) {
+              return (
+                <div className="text-[11px] text-emerald-400 font-semibold">
+                  ≈ {ccyInfo.shortLabel} {formatMonetaryAmount(displayAmount)}
+                </div>
+              );
+            }
+            return null;
+          })()}
           <div className="text-[10px] text-slate-400">Account: {alert.accountNumber}</div>
         </div>
       </div>
