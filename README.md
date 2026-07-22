@@ -5,6 +5,7 @@ A decision-support prototype that ingests transaction data (CSV/Excel) and gener
 **[https://bt-project-aml.ai.studio/](https://bt-project-aml.ai.studio/)**
 
 > ⚠️ **Demo data only.** Do not upload real, personal, or client transaction data — this is a public student project, not a secure or certified compliance system. Use the included sample datasets or your own synthetic data.
+(Test data: sample_transactions_500.csv)
 
 ## What it does
 
